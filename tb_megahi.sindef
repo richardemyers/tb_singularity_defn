@@ -1,0 +1,38 @@
+BootStrap: debootstrap
+OSVersion: jammy
+MirrorURL: http://us.archive.ubuntu.com/ubuntu/
+Include: bzip2 ca-certificates curl git ssh tzdata file
+
+%setup
+    SINDEF_CONTENT_DIR="${SINDEF_CONTENT_DIR:-$HOME}"
+
+    cp -p ${SINDEF_CONTENT_DIR}/megahitb/megahiTB ${SINGULARITY_ROOTFS}/opt/
+    cp -p ${SINDEF_CONTENT_DIR}/singularity_defs/tb_megahi.sindef ${SINGULARITY_ROOTFS}/.singularity-definition
+
+    GIT_VERSION=$(git -C "${SINDEF_CONTENT_DIR}/singularity_defs" log -1 --pretty=format:"%H")
+    if [ ! -z "$(git -C "${SINDEF_CONTENT_DIR}/singularity_defs" status --untracked-files=no --porcelain)" ]; then GIT_VERSION="$GIT_VERSION"-unclean; fi
+    echo $GIT_VERSION > ${SINGULARITY_ROOTFS}/.git-version
+
+%labels
+    Version v1.0
+
+%post
+    echo "Hello from inside the container"
+    sed -i 's/$/ universe/' /etc/apt/sources.list
+    apt-get update
+    apt-get -y install git wget build-essential libz-dev gawk
+    apt-get clean
+
+    cd /opt
+    curl -Ls https://micro.mamba.pm/api/micromamba/linux-64/2.0.2 | tar -xj -C /bin --strip-components=1 bin/micromamba
+    export MAMBA_ROOT_PREFIX=/opt/micromamba
+
+    micromamba install -c conda-forge -c bioconda biocamlib cutadapt trim-galore flash megahit
+
+    micromamba clean --all
+
+%environment
+    export LC_ALL=C
+    export PATH=/opt/micromamba/bin:$PATH
+
+

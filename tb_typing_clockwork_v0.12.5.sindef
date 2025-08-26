@@ -1,0 +1,75 @@
+BootStrap: library
+From: ubuntu:20.04
+
+%environment
+    export PERL5LIB=/bioinf-tools/vcftools-0.1.15/install/share/perl/5.30.0/:/bioinf-tools/cortex/scripts/analyse_variants/bioinf-perl/lib:/bioinf-tools/cortex/scripts/calling/:$PERL5LIB
+    export PATH=/bioinf-tools/:/bioinf-tools/cortex/bin/:/bioinf-tools/cortex/scripts/analyse_variants/seq-align/bin/:/bioinf-tools/vcftools-0.1.15/install/bin:/bioinf-tools/enaBrowserTools/python3:/opt/clockwork/scripts/:/opt/gatk:$PATH
+    export NXF_VER=22.10.0
+    export LD_LIBRARY_PATH=/usr/local/lib:$LD_LIBRARY_PATH
+    export TAR_OPTIONS="--no-same-owner"
+
+%post
+    export DEBIAN_FRONTEND=noninteractive
+    export TAR_OPTIONS="--no-same-owner"
+
+    apt-get update && apt-get install -y \
+        tzdata \
+        git \
+        rsync \
+        jq \
+        ca-certificates \
+        ca-certificates-java \
+        software-properties-common \
+        python3-pip \
+        python3-setuptools \
+        python3-dev \
+        wget \
+        unzip \
+        default-jre
+
+    # Set timezone
+    ln -fs /usr/share/zoneinfo/Europe/London /etc/localtime
+    dpkg-reconfigure -f noninteractive tzdata
+
+    # Ensure Python symlink exists
+    ln -s /usr/bin/python3 /usr/bin/python
+
+    # Clone a specific Clockwork version (v0.12.5) into /opt/clockwork
+    rm -rf /opt/clockwork
+    git clone --depth 1 --branch v0.12.5 https://github.com/iqbal-lab-org/clockwork.git /opt/clockwork
+
+    # Remove MySQL dependency in install_dependencies.sh
+    sed -i 's/service mysql start/#service mysql start/g' /opt/clockwork/scripts/install_dependencies.sh
+    sed -i 's/apt-get install -y mysql-server/#apt-get install -y mysql-server/g' /opt/clockwork/scripts/install_dependencies.sh
+    sed -i 's/mysql -e/#mysql -e/g' /opt/clockwork/scripts/install_dependencies.sh
+
+    # Install dependencies (excluding MySQL)
+    bash /opt/clockwork/scripts/install_dependencies.sh /bioinf-tools
+
+    # Ensure /usr/local/bin exists
+    mkdir -p /usr/local/bin
+
+    # Symlink Picard from /bioinf-tools/
+    if [ -f /bioinf-tools/picard.jar ]; then
+        ln -sf /bioinf-tools/picard.jar /usr/local/bin/picard.jar
+    fi
+
+    # Install GATK
+    mkdir -p /opt/gatk
+    cd /opt/gatk
+    wget -q https://github.com/broadinstitute/gatk/releases/download/4.2.6.1/gatk-4.2.6.1.zip
+    unzip -q gatk-4.2.6.1.zip
+    rm gatk-4.2.6.1.zip
+    chmod +x /opt/gatk/gatk-4.2.6.1/gatk
+    ln -sf /opt/gatk/gatk-4.2.6.1/gatk /usr/local/bin/gatk
+
+    # Install Clockwork Python package
+    cd /opt/clockwork/python
+    python3 setup.py install
+
+%labels
+    Version 0.12.5
+
+%runscript
+    clockwork "$@"
+

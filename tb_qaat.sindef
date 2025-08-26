@@ -1,0 +1,107 @@
+BootStrap: debootstrap
+OSVersion: focal
+MirrorURL: http://us.archive.ubuntu.com/ubuntu/
+
+
+%setup
+    SINDEF_CONTENT_DIR="${SINDEF_CONTENT_DIR:-$HOME}"
+
+    cp -p ${SINDEF_CONTENT_DIR}/singularity_defs/tb_qaat.sindef ${SINGULARITY_ROOTFS}/.singularity-definition
+    
+    GIT_VERSION=$(git -C "${SINDEF_CONTENT_DIR}/singularity_defs" log -1 --pretty=format:"%H")
+    if [ ! -z "$(git -C "${SINDEF_CONTENT_DIR}/singularity_defs" status --untracked-files=no --porcelain)" ]; then GIT_VERSION="$GIT_VERSION"-unclean; fi
+    echo $GIT_VERSION > ${SINGULARITY_ROOTFS}/.git-version
+
+%labels
+    Version 0.1
+
+%post
+    echo "Hello from inside the container"
+    sed -i 's/$/ universe/' /etc/apt/sources.list
+
+    samtools_version=1.12
+    bcftools_version=1.12
+    htslib_version=1.12
+    bedtools_version=2.29.2
+    fastp_version=0.20.1
+    fastqc_version=0.11.9
+    fqtools_version=2.3
+
+    PACKAGES="procps curl git wget build-essential zlib1g-dev libncurses-dev libz-dev libbz2-dev liblzma-dev libcurl4-openssl-dev libgsl-dev rsync unzip ncbi-blast+ pigz jq libtbb-dev openjdk-11-jre-headless autoconf r-base-core locales locales-all"
+    PYTHON="python3 python3-pip python3-dev"
+    PYTHON_PACKAGES="biopython"
+
+    LD_LIBRARY_PATH=/usr/local/lib
+
+    export DEBIAN_FRONTEND="noninteractive"
+
+    PATH=/opt/bin:$PATH
+
+    apt-get update \
+    && DEBIAN_FRONTEND="noninteractive" apt-get install -y $PACKAGES $PYTHON \
+    && pip3 install --upgrade pip \
+    && pip3 install $PYTHON_PACKAGES \
+    && ln -s /usr/bin/python3 /usr/bin/python
+
+    curl -fsSL https://github.com/samtools/samtools/archive/${samtools_version}.tar.gz | tar -xz \
+    && curl -fsSL https://github.com/samtools/htslib/releases/download/${htslib_version}/htslib-${htslib_version}.tar.bz2 | tar -xj \
+    && make -C samtools-${samtools_version} -j HTSDIR=../htslib-${htslib_version} \
+    && make -C samtools-${samtools_version} -j HTSDIR=../htslib-${htslib_version} prefix=/usr/local install \
+    && rm -r samtools-${samtools_version} \
+    && curl -fsSL https://github.com/samtools/bcftools/archive/refs/tags/${bcftools_version}.tar.gz | tar -xz \
+    && make -C bcftools-${bcftools_version} -j HTSDIR=../htslib-${htslib_version} \
+    && make -C bcftools-${bcftools_version} -j HTSDIR=../htslib-${htslib_version} prefix=/usr/local install \
+    && rm -r bcftools-${bcftools_version}
+
+    curl -fsSL https://github.com/alastair-droop/fqtools/archive/v${fqtools_version}.tar.gz | tar -xz \
+    && mv htslib-${htslib_version} fqtools-${fqtools_version} \
+    && cd fqtools-${fqtools_version} \
+    && mv htslib-${htslib_version} htslib \
+    && cd htslib \
+    && autoreconf -i \
+    && ./configure \
+    && make \
+    && make install \
+    && cd .. \
+    && make \
+    && mv bin/* /usr/local/bin \
+    && chmod +x /usr/local/bin/fqtools \
+    && cd .. \
+    && rm -r fqtools-${fqtools_version}
+
+    curl -fsSL https://github.com/arq5x/bedtools2/releases/download/v${bedtools_version}/bedtools-${bedtools_version}.tar.gz | tar -xz \
+    && make -C bedtools2 \
+    && mv bedtools2/bin/* /usr/local/bin \
+    && rm -r bedtools2
+
+    curl -fsSL https://github.com/OpenGene/fastp/archive/v${fastp_version}.tar.gz | tar -xz \
+    && cd fastp-${fastp_version} \
+    && make \
+    && make install \
+    && cd .. \
+    && rm -r fastp-${fastp_version}
+
+    wget https://www.bioinformatics.babraham.ac.uk/projects/fastqc/fastqc_v${fastqc_version}.zip \
+    && unzip fastqc_v${fastqc_version}.zip \
+    && chmod +x FastQC/fastqc \
+    && mv FastQC/* /usr/local/bin \
+    && rm fastqc_v${fastqc_version}.zip \
+    && rm -r FastQC
+
+    unset DEBIAN_FRONTEND
+
+%environment
+    export LC_ALL=C
+    export samtools_version=1.12
+    export bcftools_version=1.12
+    export htslib_version=1.12
+    export bedtools_version=2.29.2
+    export fastp_version=0.20.1
+    export fastqc_version=0.11.9
+    export fqtools_version=2.3
+    export PACKAGES="procps curl git wget build-essential zlib1g-dev libncurses-dev libz-dev libbz2-dev liblzma-dev libcurl4-openssl-dev libgsl-dev rsync unzip ncbi-blast+ pigz jq libtbb-dev openjdk-11-jre-headless autoconf r-base-core locales locales-all"
+    export PYTHON="python3 python3-pip python3-dev"
+    export PYTHON_PACKAGES="biopython awscli boto3"
+    export LD_LIBRARY_PATH=/usr/local/lib
+    export PATH=/opt/bin:$PATH
+

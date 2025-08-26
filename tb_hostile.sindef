@@ -1,0 +1,30 @@
+BootStrap: debootstrap
+OSVersion: jammy
+MirrorURL: http://us.archive.ubuntu.com/ubuntu/
+Include: bzip2 ca-certificates curl git ssh tzdata
+
+%setup
+    SINDEF_CONTENT_DIR="${SINDEF_CONTENT_DIR:-$HOME}"
+
+    cp -p ${SINDEF_CONTENT_DIR}/singularity_defs/tb_hostile.sindef ${SINGULARITY_ROOTFS}/.singularity-definition
+    
+    GIT_VERSION=$(git -C "${SINDEF_CONTENT_DIR}/singularity_defs" log -1 --pretty=format:"%H")
+    if [ ! -z "$(git -C "${SINDEF_CONTENT_DIR}/singularity_defs" status --untracked-files=no --porcelain)" ]; then GIT_VERSION="$GIT_VERSION"-unclean; fi
+    echo $GIT_VERSION > ${SINGULARITY_ROOTFS}/.git-version
+
+%labels
+    Version 0.1
+
+%post
+
+    # Download and prepare micromamba
+    curl -Ls https://micro.mamba.pm/api/micromamba/linux-64/latest | tar -xj -C /bin --strip-components=1 bin/micromamba
+    export MAMBA_ROOT_PREFIX=/opt/micromamba
+
+    # create hostile env and install hostile with micromamba. Version: 1.1.0 (Release Date: April 10, 2024)
+    micromamba create -y -n hostile -c conda-forge -c bioconda hostile=1.1.0
+    micromamba clean --all
+
+%environment
+    export PATH=/opt/micromamba/envs/hostile/bin:$PATH
+    
