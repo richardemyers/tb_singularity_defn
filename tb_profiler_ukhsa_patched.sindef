@@ -1,0 +1,79 @@
+Bootstrap: docker
+From: mambaorg/micromamba:noble
+Include: bzip2 ca-certificates curl git ssh tzdata
+
+%setup
+    SINDEF_CONTENT_DIR="${SINDEF_CONTENT_DIR:-$HOME}"
+
+    cp -p ${SINDEF_CONTENT_DIR}/singularity_defs/tb_profiler_ukhsa_patched.sindef ${SINGULARITY_ROOTFS}/.singularity-definition
+
+    # Copy your custom mutations file directly into the container's /opt directory
+    cp -p ${SINDEF_CONTENT_DIR}/project/ukhsa_tbdb/mutations.csv ${SINGULARITY_ROOTFS}/opt/tbdb_mutations_list_aug2025_plus_UKHSA_additions.csv
+
+    GIT_VERSION=$(git -C "${SINDEF_CONTENT_DIR}/singularity_defs" log -1 --pretty=format:"%H")
+    if [ ! -z "$(git -C "${SINDEF_CONTENT_DIR}/singularity_defs" status --untracked-files=no --porcelain)" ]; then GIT_VERSION="$GIT_VERSION"-unclean; fi
+    echo $GIT_VERSION > ${SINGULARITY_ROOTFS}/.git-version
+
+%labels
+    Version 1.1
+
+
+%post
+    echo "Hello from inside the container"
+    sed -i 's/$/ universe/' /etc/apt/sources.list
+    
+
+    apt-get update && apt-get install -y python3-pip python3-venv openjdk-21-jre-headless
+    apt-get -y install git wget tabix build-essential libz-dev
+
+    pip install --upgrade --break-system-packages --ignore-installed pip setuptools wheel
+
+
+    apt-get clean
+    rm -rf /var/lib/apt/lists/*
+    
+    micromamba update -n base --yes ca-certificates certifi
+
+    # Install Python 3.10, tb-profiler, and dependencies via conda-forge
+    micromamba install -n base -c conda-forge -c bioconda python=3.10 tb-profiler=6.6.5 jq -y openjdk=21 'setuptools<81'
+
+    # Explicitly install/upgrade to pip 26.2.2 inside the base conda environment
+    micromamba run -n base pip install --upgrade pip==26.2.2
+
+    # Clone and install tbp-parser using the conda python/pip environment
+    cd /opt
+    git clone https://github.com/theiagen/tbp-parser.git
+    cd tbp-parser
+    git checkout a2397ee82a5b594346df9cbf307b062ccd50d67c
+    pip install --break-system-packages .
+
+    # --- Build custom TBDB library ---
+    cd /opt
+    git clone https://github.com/jodyphelan/tbdb.git
+    cd tbdb
+
+    # Use a specific known-good release commit or tag for tbdb
+    git checkout 13b6ed4
+    
+    # Create and set the custom database active in tb-profiler
+    micromamba run -n base tb-profiler create_db --prefix custom_db --csv /opt/tbdb_mutations_list_aug2025_plus_UKHSA_additions.csv
+    micromamba run -n base tb-profiler load_library custom_db
+
+    # --- PRE-INDEX THE FASTA FOR READ-ONLY RUNTIMES ---
+    # This prevents TB-Profiler from trying to write index files at runtime
+    micromamba run -n base bwa index /opt/conda/share/tbprofiler/custom_db.fasta
+
+    # Clean up to make image tiny &
+    # Clean up temporary files and source repo
+    rm -rf /opt/tbdb /opt/tbdb_mutations_list_aug2025_plus_UKHSA_additions.csv
+    micromamba clean -afy
+
+    # Ensure tb-profiler and tbp-parser are in a standard PATH for Nextflow
+    ln -s /opt/conda/bin/tb-profiler /usr/local/bin/tb-profiler
+
+%environment
+    export LC_ALL=C
+    export MAMBA_ROOT_PREFIX=/opt/conda
+    export PATH=/opt/conda/bin:$PATH
+
+

@@ -1,0 +1,41 @@
+BootStrap: debootstrap
+OSVersion: jammy
+MirrorURL: http://us.archive.ubuntu.com/ubuntu/
+
+%setup
+    SINDEF_CONTENT_DIR="${SINDEF_CONTENT_DIR:-$HOME}"
+    cp -rp ${SINDEF_CONTENT_DIR}/project/generate_summary_json ${SINGULARITY_ROOTFS}/opt
+    cp -rp ${SINDEF_CONTENT_DIR}/project/generate_xml_json ${SINGULARITY_ROOTFS}/opt
+    cp -p ${SINDEF_CONTENT_DIR}/singularity_defs/tb_xml_generator.sindef ${SINGULARITY_ROOTFS}/.singularity-definition
+    GIT_VERSION=$(git -C "${SINDEF_CONTENT_DIR}/singularity_defs" log -1 --pretty=format:"%H")
+    if [ ! -z "$(git -C "${SINDEF_CONTENT_DIR}/singularity_defs" status --untracked-files=no --porcelain)" ]; then GIT_VERSION="$GIT_VERSION"-unclean; fi
+    echo $GIT_VERSION > ${SINGULARITY_ROOTFS}/.git-version
+
+%labels
+    Version 0.4
+
+%post
+    sed -i 's/$/ universe/' /etc/apt/sources.list
+    apt-get update
+    apt-get -y install python3.9 python3-pip git
+    apt-get clean
+
+    pip3 install --upgrade pip
+    pip3 install pandas==2.3.3 --no-cache-dir
+    pip3 install xmltodict==1.0.4
+
+    cd /opt/generate_xml_json
+    git checkout tags/2.1
+
+    cd /opt/generate_summary_json
+    git checkout tags/1.3
+
+    apt -y autoremove && apt clean
+
+    chmod -R 777 /opt/generate_summary_json
+    chmod -R 777 /opt/generate_xml_json
+    
+%environment
+    export LC_ALL=C
+    export PATH=$PATH:/opt/generate_xml_json:/opt/generate_summary_json
+    export PYTHONPATH=/opt/generate_xml_json:/opt/generate_summary_json

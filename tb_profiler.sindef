@@ -1,6 +1,5 @@
-BootStrap: debootstrap
-OSVersion: jammy
-MirrorURL: http://us.archive.ubuntu.com/ubuntu/
+Bootstrap: docker
+From: mambaorg/micromamba:noble
 Include: bzip2 ca-certificates curl git ssh tzdata
 
 %setup
@@ -13,42 +12,41 @@ Include: bzip2 ca-certificates curl git ssh tzdata
     echo $GIT_VERSION > ${SINGULARITY_ROOTFS}/.git-version
 
 %labels
-    Version 0.8
+    Version 1.0
 
 %post
     echo "Hello from inside the container"
     sed -i 's/$/ universe/' /etc/apt/sources.list
-    apt-get update
+    
+
+    apt-get update && apt-get install -y python3-pip python3-venv openjdk-21-jre-headless
     apt-get -y install git wget tabix build-essential libz-dev
+
+    pip install --upgrade --break-system-packages --ignore-installed pip setuptools wheel
+
+
     apt-get clean
+    rm -rf /var/lib/apt/lists/*
 
-    cd /opt
-    curl -Ls https://micro.mamba.pm/api/micromamba/linux-64/2.0.2 | tar -xj -C /bin --strip-components=1 bin/micromamba
-    export MAMBA_ROOT_PREFIX=/opt/micromamba
-
-    micromamba install -c conda-forge -c bioconda tb-profiler=6.6.5
-    micromamba install --yes --name base --channel conda-forge jq
-
-    # tbp-parser related
-    micromamba install -c conda-forge pandas
-    micromamba install -c conda-forge importlib_resources
-    micromamba install -c conda-forge -c bioconda samtools
+    micromamba install -n base -c conda-forge -c bioconda tb-profiler=6.6.5 jq -y openjdk=21 'setuptools<81'
 
     cd /opt
     git clone https://github.com/theiagen/tbp-parser.git
     cd tbp-parser
-    git checkout tags/v2.7.0
+    git checkout a2397ee82a5b594346df9cbf307b062ccd50d67c
+    pip install --break-system-packages .
 
-    micromamba clean --all
+    # clean up to make image tiny
+    micromamba clean -afy
 
-    micromamba run -n base tb-profiler update_tbdb --commit 00a0db4
+    micromamba run -n base tb-profiler update_tbdb --commit 13b6ed4
     
     # Ensure tb-profiler and tbp-parser are in a standard PATH for Nextflow
-    ln -s /opt/micromamba/bin/tb-profiler /usr/local/bin/tb-profiler
-    ln -s /opt/micromamba/bin/tbp-parser /usr/local/bin/tbp-parser
+    ln -s /opt/conda/bin/tb-profiler /usr/local/bin/tb-profiler
 
 %environment
     export LC_ALL=C
-    export PATH=/opt/micromamba/bin:$PATH
+    export MAMBA_ROOT_PREFIX=/opt/conda
+    export PATH=/opt/conda/bin:$PATH
 
 

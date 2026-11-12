@@ -4,35 +4,74 @@ MirrorURL: http://us.archive.ubuntu.com/ubuntu/
 Include: bzip2 ca-certificates curl git ssh tzdata file
 
 %setup
+    # Where the build will read files from on the host (defaults to $HOME)
     SINDEF_CONTENT_DIR="${SINDEF_CONTENT_DIR:-$HOME}"
 
+    # Copy the script baked by your builder (expects: $SINDEF_CONTENT_DIR/tb_or_not_tb/TB-or-not-TB)
     cp -p ${SINDEF_CONTENT_DIR}/tb_or_not_tb/TB-or-not-TB ${SINGULARITY_ROOTFS}/opt/
+    # Keep a copy of this sindef for provenance
     cp -p ${SINDEF_CONTENT_DIR}/singularity_defs/tb_or_not_tb.sindef ${SINGULARITY_ROOTFS}/.singularity-definition
 
+    # Record this definitions repo git version (provenance)
     GIT_VERSION=$(git -C "${SINDEF_CONTENT_DIR}/singularity_defs" log -1 --pretty=format:"%H")
     if [ ! -z "$(git -C "${SINDEF_CONTENT_DIR}/singularity_defs" status --untracked-files=no --porcelain)" ]; then GIT_VERSION="$GIT_VERSION"-unclean; fi
     echo $GIT_VERSION > ${SINGULARITY_ROOTFS}/.git-version
 
 %labels
-    Version vD1.1
+    Version v14D # version bumped
 
 %post
+    set -eu
     echo "Hello from inside the container"
+
+    # Enable universe, update, and install minimal OS deps
     sed -i 's/$/ universe/' /etc/apt/sources.list
     apt-get update
-    apt-get -y install git wget build-essential libz-dev gawk
+    DEBIAN_FRONTEND=noninteractive apt-get -y install \
+        git wget build-essential libz-dev gawk \
+        parallel pigz
     apt-get clean
 
+    # Install micromamba
     cd /opt
     curl -Ls https://micro.mamba.pm/api/micromamba/linux-64/2.0.2 | tar -xj -C /bin --strip-components=1 bin/micromamba
     export MAMBA_ROOT_PREFIX=/opt/micromamba
+    mkdir -p "$MAMBA_ROOT_PREFIX"
 
-    micromamba install -c conda-forge -c bioconda gem3-mapper=3.6.1 blast=2.16.0 biocamlib=1.0.0
-
+    # Bio deps:
+    # - gem3-mapper (gem-mapper binary)
+    # - blast (dustmasker binary)
+    # - fastools (lowercase 'fastools' binary; we'll symlink to 'FASTools')
+    micromamba install -y -c conda-forge -c bioconda \
+        gem3-mapper=3.6.1 \
+        blast=2.16.0 \
+        fastools=1.1.5 \
+        biocamlib=1.0.0
     micromamba clean --all
+
+    # Make the main script usable from PATH
+    chmod +x /opt/TB-or-not-TB
+    ln -sf /opt/TB-or-not-TB /usr/local/bin/TB-or-not-TB
+
+    # Script calls 'FASTools' (capital F); conda installs 'fastools' (lowercase)
+    if command -v fastools >/dev/null 2>&1; then
+      ln -sf "$(command -v fastools)" /usr/local/bin/FASTools
+    fi
 
 %environment
     export LC_ALL=C
-    export PATH=/opt/micromamba/bin:$PATH
+    # Ensure both micromamba and /usr/local/bin are on PATH
+    export PATH=/usr/local/bin:/opt/micromamba/bin:$PATH
 
+# (Optional) quick build-time smoke test — remove if you want zero changes outside your original
+%test
+    set -e
+    TB-or-not-TB -V
+    command -v gem-mapper
+    command -v dustmasker
+    command -v FASTools
+    command -v parallel
+    command -v pigz
+    command -v gawk
+    command -v file
 

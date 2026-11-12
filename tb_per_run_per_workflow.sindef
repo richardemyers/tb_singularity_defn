@@ -1,0 +1,50 @@
+BootStrap: debootstrap
+OSVersion: jammy
+MirrorURL: http://us.archive.ubuntu.com/ubuntu/
+Include: bzip2 ca-certificates curl rsync git ssh tzdata
+
+%setup
+    SINDEF_CONTENT_DIR="${SINDEF_CONTENT_DIR:-$HOME}"
+
+    cp -rp ${SINDEF_CONTENT_DIR}/project/tb_per_run_per_workflow ${SINGULARITY_ROOTFS}/opt
+    cp -rp ${SINDEF_CONTENT_DIR}/project/phengs_lib ${SINGULARITY_ROOTFS}/opt
+
+    cp -p ${SINDEF_CONTENT_DIR}/singularity_defs/tb_per_run_per_workflow.sindef ${SINGULARITY_ROOTFS}/.singularity-definition
+    
+    GIT_VERSION=$(git -C "${SINDEF_CONTENT_DIR}/singularity_defs" log -1 --pretty=format:"%H")
+    if [ ! -z "$(git -C "${SINDEF_CONTENT_DIR}/singularity_defs" status --untracked-files=no --porcelain)" ]; then GIT_VERSION="$GIT_VERSION"-unclean; fi
+    echo $GIT_VERSION > ${SINGULARITY_ROOTFS}/.git-version
+
+%labels
+    Version 1.3
+
+%environment
+    export PATH=/opt/tb_per_run_per_workflow:/opt/micromamba/envs/tb_fn2_env/bin:$PATH
+
+
+%post
+    echo "Hello from inside the container"
+    sed -i 's/$/ universe/' /etc/apt/sources.list
+    apt-get update
+    apt-get -y install git wget build-essential libz-dev
+    apt-get clean
+
+   # Download and prepare micromamba
+    curl -Ls https://micro.mamba.pm/api/micromamba/linux-64/latest | tar -xj -C /bin --strip-components=1 bin/micromamba
+    export MAMBA_ROOT_PREFIX=/opt/micromamba
+
+
+    # Install the conda environment.
+    # Note - we install the pip packages from local git repos, rather than cloning from GitLab as
+    # part of the conda environment installation. (Do this by editing the conda_env.yml file with
+    # sed).
+
+    # Replace git+ssh://git@gitlab.phe.gov.uk/bioinf/NGSS/ with git+file:///opt
+    sed -i -e 's/git+ssh:\/\/git@gitlab.phe.gov.uk\/bioinf\/NGSS/git+file:\/\/\/opt/g' /opt/tb_per_run_per_workflow/conda_env.yml
+    # Remove '.git' from the filename, leftover from converting the URL
+    sed -i -e 's/\.git//g' /opt/tb_per_run_per_workflow/conda_env.yml
+    micromamba create --quiet --yes --file /opt/tb_per_run_per_workflow/conda_env.yml
+    micromamba clean --all
+
+
+
